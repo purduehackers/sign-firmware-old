@@ -1,0 +1,38 @@
+[package]
+edition = "2021"
+name = "bootloader"
+version = "0.1.0"
+authors = ["Jack Hogan <jackhogan11@gmail.com>"]
+resolver = "2"
+
+[dependencies]
+defmt = { version = "0.3", optional = true }
+defmt-rtt = { version = "0.4", optional = true }
+
+# embedded-hal = "1.0.0"
+# embedded-hal-async = "1.0.0"
+# embedded-io = "0.6.1"
+# embedded-io-async = "0.6.1"
+embedded-storage = "0.3.1"
+
+cortex-m-rt = "0.7.3"
+
+embassy-sync = { version = "0.5.0" }
+embassy-time = { version = "0.3.0" }
+
+cortex-m = { version = "0.7.6" }
+embassy-rp = { version = "0.1.0", features = ["unstable-pac", "time-driver", "critical-section-impl"] }
+embassy-boot-rp = "0.2.0"
+embedded-storage-async = "0.4.1"
+
+[features]
+defmt = [
+    "dep:defmt",
+    "embassy-boot-rp/defmt",
+    "embassy-rp/defmt",
+]
+debug = ["defmt-rtt", "defmt"]
+
+[profile.release]
+debug = true
+opt-level = 's'
