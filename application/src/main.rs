@@ -9,6 +9,8 @@ use embassy_rp::{gpio::{Level, Output, Pin}, multicore::{spawn_core1, Stack}};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use static_cell::StaticCell;
 
+mod eeprom;
+
 const WIFI_SSID: &str = env!("WIFI_SSID");
 const WIFI_USERNAME: &str = env!("WIFI_USERNAME");
 const WIFI_PASSWORD: &str = env!("WIFI_PASSWORD");
