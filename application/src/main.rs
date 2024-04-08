@@ -3,11 +3,15 @@
 
 use defmt::*;
 use embassy_executor::Executor;
-use embassy_time::{Duration, Timer};
-use {defmt_rtt as _, panic_probe as _};
-use embassy_rp::{gpio::{Level, Output, Pin}, multicore::{spawn_core1, Stack}};
+use embassy_rp::{
+    gpio::{Level, Output, Pin},
+    multicore::{spawn_core1, Stack},
+    spi::Spi,
+};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
+use {defmt_rtt as _, panic_probe as _};
 
 mod eeprom;
 
@@ -47,6 +51,9 @@ fn main() -> ! {
             executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(led))));
         },
     );
+
+    let mut spi = Spi::new_blocking(p.SPI0, p.PIN_18, p.PIN_19, p.PIN_16, Default::default());
+    let mut eeprom = eeprom::Eeprom::from_spi(spi);
 
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| unwrap!(spawner.spawn(core0_task())));
