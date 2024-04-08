@@ -54,7 +54,7 @@ impl<'a> Eeprom<'a> {
     }
 
     fn write_config(&mut self) -> Result<(), Error> {
-        let mut metadata = [0x0_u8, size_of::<Metadata>() as u8];
+        let mut metadata = [0x0_u8; size_of::<Metadata>()];
 
         bincode::encode_into_slice(&self.metadata, &mut metadata, BINCODE_CONFIG)
             .expect("encode metadata");
