@@ -4,3 +4,6 @@ members = [
     "application",
     "bootloader",
 ]
+
+[profile.release]
+debug = 2

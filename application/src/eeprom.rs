@@ -1,18 +1,28 @@
 use core::mem::size_of;
-use embassy_rp::peripherals::SPI0;
+use embassy_rp::peripherals::{SPI0, PIN_17};
 use embassy_rp::spi::{Blocking, Error, Spi};
+use embassy_rp::gpio::Output;
+use defmt::info;
+use embassy_time::{block_for, Duration};
 
-const READ_INSTRUCTION: u32 = 0b0000_0011;
-const WRITE_INSTRUCTION: u32 = 0b0000_0010;
-const ERASE_INSTRUCTION: u32 = 0b1100_0111;
+const READ_INSTRUCTION: u8 = 0b0000_0011;
+const WRITE_INSTRUCTION: u8 = 0b0000_0010;
+const ERASE_INSTRUCTION: u8 = 0b1100_0111;
+const WRITE_ENABLE_INSTRUCTION: u8 = 0b0000_0110;
+const READ_STATUS_INSTRUCTION: u8 = 0b0000_0101;
+const WRITE_STATUS_INSTRUCTION: u8 = 0b0000_0001;
+
 /// 0xdeadbeef 0x8acc8acc (deadbeef hacchacc)
 const READ_WRITE_TEST: [u8; 8] = [0xde, 0xad, 0xbe, 0xef, 0x8a, 0xcc, 0x8a, 0xcc];
 const METADATA_BLOCK_START: u32 = 0x10;
 const DATA_BLOCK_START: u32 = 0x100;
 const CONFIG_VERSION: u8 = 1;
 
+const DELAY: Duration = Duration::from_millis(10);
+
 pub struct Eeprom<'a> {
     spi: Spi<'a, SPI0, Blocking>,
+    cs: Output<'a, PIN_17>,
     metadata: Metadata,
 }
 
@@ -28,13 +38,18 @@ const BINCODE_CONFIG: bincode::config::Configuration<bincode::config::BigEndian>
         .with_variable_int_encoding();
 
 impl<'a> Eeprom<'a> {
-    pub fn from_spi(spi: Spi<'a, SPI0, Blocking>) -> Result<Self, Error> {
+    pub fn from_spi(spi: Spi<'a, SPI0, Blocking>, cs: Output<'a, PIN_17>) -> Result<Self, Error> {
         let mut eeprom = Self {
             spi,
+            cs,
             metadata: Default::default(),
         };
 
-        assert!(eeprom.read_write_works()?, "Read-write check failed!");
+        eeprom.write_status(0)?;
+
+        info!("Read status register: 0b{:08b}", eeprom.read_status()?);
+
+        eeprom.assert_read_write_works()?;
 
         let mut metadata = [0x0; size_of::<Metadata>()];
 
@@ -63,36 +78,80 @@ impl<'a> Eeprom<'a> {
     }
 
     fn read_bytes(&mut self, address: u32, buffer: &mut [u8]) -> Result<(), Error> {
+        self.cs.set_low();
         self.spi.blocking_write(&READ_INSTRUCTION.to_be_bytes())?;
         self.spi.blocking_write(&address.to_be_bytes()[1..])?;
 
         self.spi.blocking_read(buffer)?;
+        self.cs.set_high();
+
+        block_for(DELAY);
 
         Ok(())
     }
 
     fn write_bytes(&mut self, address: u32, buffer: &[u8]) -> Result<(), Error> {
+        assert!(buffer.len() as u32 <= 256 - (address % 256), "Write buffer overflow for address 0x{address:x} and size {}!", buffer.len());
+        //self.cs.set_high();
+        self.enable_write()?;
+
+        self.cs.set_low();
         self.spi.blocking_write(&WRITE_INSTRUCTION.to_be_bytes())?;
         self.spi.blocking_write(&address.to_be_bytes()[1..])?;
 
         self.spi.blocking_write(buffer)?;
+        self.cs.set_high();
 
+        block_for(DELAY);
+
+        Ok(())
+    }
+
+    fn enable_write(&mut self) -> Result<(), Error> {
+        self.cs.set_low();
+        self.spi.blocking_write(&WRITE_ENABLE_INSTRUCTION.to_be_bytes())?;
+        self.cs.set_high();
+
+        block_for(DELAY);
         Ok(())
     }
 
     fn erase(&mut self) -> Result<(), Error> {
+        self.cs.set_low();
         self.spi.blocking_write(&ERASE_INSTRUCTION.to_be_bytes())?;
+        self.cs.set_high();
 
+        block_for(DELAY);
         Ok(())
     }
 
-    pub fn read_write_works(&mut self) -> Result<bool, Error> {
+    fn read_status(&mut self) -> Result<u8, Error> {
+        self.cs.set_low();
+        self.spi.blocking_write(&READ_STATUS_INSTRUCTION.to_be_bytes())?;
+        let mut data = [0x0; 1];
+        self.spi.blocking_read(&mut data)?;
+        self.cs.set_high();
+        Ok(data[0])
+    }
+
+    fn write_status(&mut self, status: u8) -> Result<(), Error> {
+        self.cs.set_low();
+        self.spi.blocking_write(&WRITE_STATUS_INSTRUCTION.to_be_bytes())?;
+        self.spi.blocking_write(&[status])?;
+        self.cs.set_high();
+        block_for(DELAY);
+        Ok(())
+    }
+
+    pub fn assert_read_write_works(&mut self) -> Result<(), Error> {
         self.write_bytes(0x0, &READ_WRITE_TEST)?;
 
         let mut buffer = [0x0; 8];
 
         self.read_bytes(0x0, &mut buffer)?;
 
-        Ok(buffer == READ_WRITE_TEST)
+        assert_eq!(buffer, READ_WRITE_TEST, "Read-write test failed!");
+
+        Ok(())
     }
 }
