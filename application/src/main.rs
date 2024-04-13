@@ -13,7 +13,8 @@ use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-mod eeprom;
+use application::eeprom;
+use application::schema;
 
 const WIFI_SSID: &str = env!("WIFI_SSID");
 const WIFI_USERNAME: &str = env!("WIFI_USERNAME");
@@ -53,11 +54,13 @@ fn main() -> ! {
     );
 
     let mut config = Config::default();
-    config.frequency = 10_000;
-    let mut spi = Spi::new_blocking(p.SPI0, p.PIN_18, p.PIN_19, p.PIN_16, config);
+    config.frequency = 20_000_000;
+    let spi = Spi::new_blocking(p.SPI0, p.PIN_18, p.PIN_19, p.PIN_16, config);
     let cs = Output::new(p.PIN_17, Level::High);
     let mut eeprom = eeprom::Eeprom::from_spi(spi, cs).expect("eeprom init");
     info!("EEPROM Initialized succesfully.");
+
+    
 
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| unwrap!(spawner.spawn(core0_task())));
@@ -65,7 +68,6 @@ fn main() -> ! {
 
 enum AnimationSelection {
     LightningTime,
-    Rainbow,
     Custom(u32),
 }
 

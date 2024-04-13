@@ -4,6 +4,8 @@ use embassy_rp::spi::{Blocking, Error, Spi};
 use embassy_rp::gpio::Output;
 use defmt::info;
 use embassy_time::{block_for, Duration};
+use embassy_rp::rom_data::float_funcs::*;
+use super::ceil;
 
 const READ_INSTRUCTION: u8 = 0b0000_0011;
 const WRITE_INSTRUCTION: u8 = 0b0000_0010;
@@ -91,6 +93,25 @@ impl<'a> Eeprom<'a> {
     }
 
     fn write_bytes(&mut self, address: u32, buffer: &[u8]) -> Result<(), Error> {
+        // Write to the next block
+        let diff = 256 - (address % 256);
+        if buffer.len() < diff as usize {
+            return self.write_some_bytes(address, buffer);
+        }
+        self.write_some_bytes(address, &buffer[..diff as usize])?;
+        let address = address + diff;
+        let buffer = &buffer[diff as usize..];
+
+        // Write next blocks
+        for offset_32 in 0..ceil(fdiv(buffer.len() as f32, 256.0)) as u32 {
+            let offset = offset_32 as usize;
+            self.write_some_bytes(address + offset_32 * 256, buffer.get(offset*256..(offset + 1)*256).unwrap_or(buffer.get(offset*256..).expect("valid bounds")))?;
+        }
+
+        Ok(())
+    }
+
+    fn write_some_bytes(&mut self, address: u32, buffer: &[u8]) -> Result<(), Error> {
         assert!(buffer.len() as u32 <= 256 - (address % 256), "Write buffer overflow for address 0x{address:x} and size {}!", buffer.len());
         //self.cs.set_high();
         self.enable_write()?;
