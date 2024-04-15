@@ -14,15 +14,15 @@ pub struct BezierPoint {
 
 #[derive(Debug, Encode, Decode, Clone, Copy)]
 pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
+    pub next: u8,
+    pub bezier_in: BezierPoint,
+    pub bezier_out: BezierPoint,
 }
 
 #[derive(Debug, Encode, Decode, Clone, Copy)]
 pub struct Key {
     pub time: f32,
-    pub bezier_in: BezierPoint,
-    pub bezier_out: BezierPoint,
-    pub color: Color,
+    pub red: Option<Color>,
+    pub green: Option<Color>,
+    pub blue: Option<Color>,
 }
