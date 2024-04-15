@@ -17,7 +17,6 @@ use application::eeprom;
 use application::schema;
 
 const WIFI_SSID: &str = env!("WIFI_SSID");
-const WIFI_PASSWORD: &str = env!("WIFI_PASSWORD");
 
 // #[embassy_executor::main]
 // async fn main(_spawner: Spawner) {
@@ -46,7 +45,7 @@ fn main() -> ! {
     let mut config = Config::default();
     config.frequency = 20_000_000;
     let spi = Spi::new_blocking(p.SPI0, p.PIN_18, p.PIN_19, p.PIN_16, config);
-    let cs = Output::new(p.PIN_17, Level::High); 
+    let cs = Output::new(p.PIN_17, Level::High);
 
     spawn_core1(
         p.CORE1,
@@ -78,7 +77,7 @@ async fn core0_task() {
 }
 
 #[embassy_executor::task]
-async fn core1_task(mut led: Output<'static, impl Pin>, spi: Spi<'static, embassy_rp::peripherals::SPI0, embassy_rp::spi::Blocking>, cs: Output<'static, embassy_rp::peripherals::PIN_17>) {
+async fn core1_task(mut led: Output<'static>, spi: Spi<'static, embassy_rp::peripherals::SPI0, embassy_rp::spi::Blocking>, cs: Output<'static>) {
     info!("CORE 1 START");
     let eeprom = eeprom::Eeprom::from_spi(spi, cs).await.expect("eeprom init");
     info!("EEPROM Initialized succesfully.");

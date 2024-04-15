@@ -24,7 +24,7 @@ const DELAY: Duration = Duration::from_millis(10);
 
 pub struct Eeprom<'a> {
     spi: Spi<'a, SPI0, Blocking>,
-    cs: Output<'a, PIN_17>,
+    cs: Output<'a>,
     pub metadata: Metadata,
 }
 
@@ -49,7 +49,7 @@ const BINCODE_CONFIG: bincode::config::Configuration<bincode::config::BigEndian>
         .with_variable_int_encoding();
 
 impl<'a> Eeprom<'a> {
-    pub async fn from_spi(spi: Spi<'a, SPI0, Blocking>, cs: Output<'a, PIN_17>) -> Result<Self, Error> {
+    pub async fn from_spi(spi: Spi<'a, SPI0, Blocking>, cs: Output<'a>) -> Result<Self, Error> {
         let mut eeprom = Self {
             spi,
             cs,
