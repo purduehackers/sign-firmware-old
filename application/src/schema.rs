@@ -1,4 +1,4 @@
-use bincode::{Encode, Decode};
+use bincode::{Decode, Encode};
 
 #[derive(Debug, Encode, Decode, Clone, Copy)]
 pub struct Header {

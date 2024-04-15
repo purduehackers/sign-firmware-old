@@ -1,11 +1,11 @@
-use core::mem::size_of;
-use embassy_rp::peripherals::{SPI0, PIN_17};
-use embassy_rp::spi::{Blocking, Error, Spi};
-use embassy_rp::gpio::Output;
-use defmt::info;
-use embassy_time::{Duration, Timer};
-use embassy_rp::rom_data::float_funcs::*;
 use super::ceil;
+use core::mem::size_of;
+use defmt::info;
+use embassy_rp::gpio::Output;
+use embassy_rp::peripherals::{PIN_17, SPI0};
+use embassy_rp::rom_data::float_funcs::*;
+use embassy_rp::spi::{Blocking, Error, Spi};
+use embassy_time::{Duration, Timer};
 
 const READ_INSTRUCTION: u8 = 0b0000_0011;
 const WRITE_INSTRUCTION: u8 = 0b0000_0010;
@@ -58,13 +58,18 @@ impl<'a> Eeprom<'a> {
 
         eeprom.write_status(0).await?;
 
-        info!("Read status register: 0b{:08b}", eeprom.read_status().await?);
+        info!(
+            "Read status register: 0b{:08b}",
+            eeprom.read_status().await?
+        );
 
         eeprom.assert_read_write_works().await?;
 
         let mut metadata = [0x0; size_of::<Metadata>()];
 
-        eeprom.read_bytes(METADATA_BLOCK_START, &mut metadata).await?;
+        eeprom
+            .read_bytes(METADATA_BLOCK_START, &mut metadata)
+            .await?;
 
         let (metadata, _) = bincode::decode_from_slice::<Metadata, _>(&metadata, BINCODE_CONFIG)
             .expect("decode metadata");
@@ -74,7 +79,7 @@ impl<'a> Eeprom<'a> {
             eeprom.write_config().await?;
         } else {
             eeprom.metadata = metadata;
-        } 
+        }
 
         Ok(eeprom)
     }
@@ -107,21 +112,32 @@ impl<'a> Eeprom<'a> {
         if buffer.len() < diff as usize {
             return self.write_some_bytes(address, buffer).await;
         }
-        self.write_some_bytes(address, &buffer[..diff as usize]).await?;
+        self.write_some_bytes(address, &buffer[..diff as usize])
+            .await?;
         let address = address + diff;
         let buffer = &buffer[diff as usize..];
 
         // Write next blocks
         for offset_32 in 0..ceil(fdiv(buffer.len() as f32, 256.0)) as u32 {
             let offset = offset_32 as usize;
-            self.write_some_bytes(address + offset_32 * 256, buffer.get(offset*256..(offset + 1)*256).unwrap_or(buffer.get(offset*256..).expect("valid bounds"))).await?;
+            self.write_some_bytes(
+                address + offset_32 * 256,
+                buffer
+                    .get(offset * 256..(offset + 1) * 256)
+                    .unwrap_or(buffer.get(offset * 256..).expect("valid bounds")),
+            )
+            .await?;
         }
 
         Ok(())
     }
 
     async fn write_some_bytes(&mut self, address: u32, buffer: &[u8]) -> Result<(), Error> {
-        assert!(buffer.len() as u32 <= 256 - (address % 256), "Write buffer overflow for address 0x{address:x} and size {}!", buffer.len());
+        assert!(
+            buffer.len() as u32 <= 256 - (address % 256),
+            "Write buffer overflow for address 0x{address:x} and size {}!",
+            buffer.len()
+        );
         //self.cs.set_high();
         self.enable_write().await?;
 
@@ -139,7 +155,8 @@ impl<'a> Eeprom<'a> {
 
     async fn enable_write(&mut self) -> Result<(), Error> {
         self.cs.set_low();
-        self.spi.blocking_write(&WRITE_ENABLE_INSTRUCTION.to_be_bytes())?;
+        self.spi
+            .blocking_write(&WRITE_ENABLE_INSTRUCTION.to_be_bytes())?;
         self.cs.set_high();
 
         Timer::after(DELAY).await;
@@ -157,7 +174,8 @@ impl<'a> Eeprom<'a> {
 
     async fn read_status(&mut self) -> Result<u8, Error> {
         self.cs.set_low();
-        self.spi.blocking_write(&READ_STATUS_INSTRUCTION.to_be_bytes())?;
+        self.spi
+            .blocking_write(&READ_STATUS_INSTRUCTION.to_be_bytes())?;
         let mut data = [0x0; 1];
         self.spi.blocking_read(&mut data)?;
         self.cs.set_high();
@@ -166,7 +184,8 @@ impl<'a> Eeprom<'a> {
 
     async fn write_status(&mut self, status: u8) -> Result<(), Error> {
         self.cs.set_low();
-        self.spi.blocking_write(&WRITE_STATUS_INSTRUCTION.to_be_bytes())?;
+        self.spi
+            .blocking_write(&WRITE_STATUS_INSTRUCTION.to_be_bytes())?;
         self.spi.blocking_write(&[status])?;
         self.cs.set_high();
         Timer::after(DELAY).await;
