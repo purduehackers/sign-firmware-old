@@ -3,7 +3,11 @@ use bincode::{Decode, Encode};
 #[derive(Debug, Encode, Decode, Clone, Copy)]
 pub struct Header {
     pub duration: f32,
-    pub frames: [u16; 5],
+    pub num_top_keys: u16,
+    pub num_middle_keys: u16,
+    pub num_right_keys: u16,
+    pub num_bottom_left_keys: u16,
+    pub num_bottom_right_keys: u16,
 }
 
 #[derive(Debug, Encode, Decode, Clone, Copy)]
