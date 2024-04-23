@@ -18,16 +18,44 @@ embedded-storage = "0.3.1"
 
 cortex-m-rt = "0.7.3"
 
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = ["nightly", "arch-cortex-m", "executor-thread", "defmt", "integrated-timers", "executor-interrupt"] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "nightly",
+    "arch-cortex-m",
+    "executor-thread",
+    "defmt",
+    "integrated-timers",
+    "executor-interrupt",
+] }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
 
 cortex-m = { version = "0.7.6" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rom-v2-intrinsics"] }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "defmt",
+    "unstable-pac",
+    "time-driver",
+    "critical-section-impl",
+    "rom-v2-intrinsics",
+] }
 portable-atomic = { version = "1.5", features = ["critical-section"] }
 embassy-boot-rp = { git = "https://github.com/embassy-rs/embassy.git" }
 static_cell = "2.0.0"
-bincode = { version = "2.0.0-rc.3", default-features = false, features = ["derive"] }
+bincode = { version = "2.0.0-rc.3", default-features = false, features = [
+    "derive",
+] }
 lightning-time = { version = "0.2.0", default-features = false }
 cyw43 = { git = "https://github.com/embassy-rs/embassy.git" }
 cyw43-pio = { git = "https://github.com/embassy-rs/embassy.git" }
+chrono = { version = "0.4.38", default-features = false }
+reqwless = "0.11.0"
+embassy-net = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "defmt",
+    "dhcpv4",
+    "medium-ip",
+    "proto-ipv4",
+    "tcp",
+    "dns",
+] }

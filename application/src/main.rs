@@ -2,19 +2,30 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+use core::ptr::{addr_of, addr_of_mut};
+
+use chrono::{DateTime, TimeZone};
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::{Executor, Spawner};
+use embassy_net::{
+    dns::DnsSocket,
+    tcp::client::{TcpClient, TcpClientState},
+    Config as NetConfig, Stack as NetStack, StackResources,
+};
 use embassy_rp::{
     bind_interrupts,
     gpio::{Level, Output, Pin},
     multicore::{spawn_core1, Stack},
     peripherals::{DMA_CH0, PIO0},
     pio::{InterruptHandler, Pio},
+    rtc::DateTime as RpDateTime,
     spi::{Config, Spi},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embassy_time::{Duration, Timer};
+use panic_probe::hard_fault;
+use reqwless::client::HttpClient;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -25,7 +36,7 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
-const WIFI_SSID: &str = env!("WIFI_SSID");
+const WIFI_SSID: &str = "PAL-Gadgets";
 
 // #[embassy_executor::main]
 // async fn main(_spawner: Spawner) {
@@ -39,6 +50,8 @@ const WIFI_SSID: &str = env!("WIFI_SSID");
 static mut CORE1_STACK: Stack<4096> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+static NET_STACK: StaticCell<NetStack<cyw43::NetDriver>> = StaticCell::new();
+static mut NET_STACK_RESOURCES: StackResources<16> = StackResources::new();
 static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
 
 enum LedState {
@@ -73,8 +86,7 @@ fn main() -> ! {
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
-            executor1
-                .run(|spawner| unwrap!(spawner.spawn(core1_task())));
+            executor1.run(|spawner| unwrap!(spawner.spawn(core1_task())));
         },
     );
 
@@ -83,7 +95,8 @@ fn main() -> ! {
     let state = STATE.init(cyw43::State::new());
 
     let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(|spawner| unwrap!(spawner.spawn(core0_task(spi, cs, spawner, pwr, pio_spi, state))));
+    executor0
+        .run(|spawner| unwrap!(spawner.spawn(core0_task(spi, cs, spawner, pwr, pio_spi, state))));
 }
 
 enum AnimationSelection {
@@ -122,7 +135,7 @@ async fn core0_task(
 
     let fw = include_bytes!("../firmware/43439A0.bin");
     let clm = include_bytes!("../firmware/43439A0_clm.bin");
-    let (_net_device, mut control, runner) = cyw43::new(state, pwr, pio_spi, fw).await;
+    let (net_device, mut control, runner) = cyw43::new(state, pwr, pio_spi, fw).await;
     unwrap!(spawner.spawn(wifi_task(runner)));
 
     control.init(clm).await;
@@ -134,6 +147,44 @@ async fn core0_task(
         "WiFi Initialized with MAC address {:02x}",
         control.address().await
     );
+
+    let connected = match control.join_open(WIFI_SSID).await {
+        Ok(()) => true,
+        Err(_e) => {
+            warn!("Wi-Fi connection error!");
+            false
+        }
+    };
+
+    let stack = NetStack::new(
+        net_device,
+        NetConfig::default(),
+        unsafe { &mut *addr_of_mut!(NET_STACK_RESOURCES) },
+        0xdeadbeef,
+    );
+    let stack = NET_STACK.init(stack);
+    let state: TcpClientState<16, 16, 16> = TcpClientState::new();
+    let tcp = TcpClient::new(&stack, &state);
+    let dns = DnsSocket::new(&stack);
+    let client = HttpClient::new(&tcp, &dns);
+
+    // Grab necessary time and update data
+    let (current_time, update_available) = if connected {
+        hard_fault()
+    } else {
+        (
+            RpDateTime {
+                year: 2003,
+                day: 29,
+                month: 12,
+                day_of_week: embassy_rp::rtc::DayOfWeek::Monday,
+                hour: 0,
+                minute: 0,
+                second: 0,
+            },
+            false,
+        )
+    };
 
     let eeprom = eeprom::Eeprom::from_spi(spi, cs)
         .await
