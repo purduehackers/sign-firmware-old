@@ -30,8 +30,8 @@ use reqwless::client::HttpClient;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use application::eeprom;
-use application::schema;
+use application::{eeprom, Leds};
+use application::{schema, Block};
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
@@ -98,12 +98,25 @@ fn main() -> ! {
 
     let rtc = Rtc::new(p.RTC);
 
+    let config = embassy_rp::pwm::Config::default();
+
+    let leds = Leds {
+        s0: Pwm::new_output_ab(p.PWM_SLICE0, p.PIN_0, p.PIN_1, config.clone()),
+        s1: Pwm::new_output_ab(p.PWM_SLICE1, p.PIN_2, p.PIN_3, config.clone()),
+        s2: Pwm::new_output_ab(p.PWM_SLICE2, p.PIN_4, p.PIN_5, config.clone()),
+        s3: Pwm::new_output_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, config.clone()),
+        s4: Pwm::new_output_ab(p.PWM_SLICE4, p.PIN_8, p.PIN_9, config.clone()),
+        s5: Pwm::new_output_ab(p.PWM_SLICE5, p.PIN_10, p.PIN_11, config.clone()),
+        s6: Pwm::new_output_ab(p.PWM_SLICE6, p.PIN_12, p.PIN_13, config.clone()),
+        s7: Pwm::new_output_a(p.PWM_SLICE7, p.PIN_14, config),
+    };
+
     spawn_core1(
         p.CORE1,
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
-            executor1.run(|spawner| unwrap!(spawner.spawn(core1_task())));
+            executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(leds))));
         },
     );
 
@@ -123,7 +136,7 @@ enum AnimationSelection {
 }
 
 #[embassy_executor::task]
-async fn core1_task() {
+async fn core1_task(mut leds: Leds<'static>) {
     info!("CORE 1 START");
     info!("Waiting for RTC...");
     let rtc = RTC_CHANNEL.receive().await;
@@ -133,8 +146,15 @@ async fn core1_task() {
         let time = NaiveTime::from_hms_opt(now.hour as u32, now.minute as u32, now.second as u32)
             .expect("valid time");
         let time = LightningTime::from(time);
-
-        Timer::after_millis(50).await;
+        let colors = time.colors();
+        leds.set_color(colors.bolt, Block::BottomLeft);
+        for block in [Block::Top, Block::Center] {
+            leds.set_color(colors.zap, block);
+        }
+        for block in [Block::Right, Block::BottomRight] {
+            leds.set_color(colors.spark, block);
+        }
+        Timer::after_millis(100).await;
     }
 }
 
