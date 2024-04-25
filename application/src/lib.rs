@@ -30,11 +30,11 @@ pub struct Leds<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Block {
-    Top = 1,
-    Center,
-    Right,
+    Center = 1,
     BottomLeft,
     BottomRight,
+    Right,
+    Top,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
