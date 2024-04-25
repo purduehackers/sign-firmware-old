@@ -39,27 +39,40 @@ bind_interrupts!(struct Irqs {
 
 const WIFI_SSID: &str = "PAL-Gadgets";
 
-// #[embassy_executor::main]
-// async fn main(_spawner: Spawner) {
-//     let _p = embassy_rp::init(Default::default());
-//     loop {
-//         defmt::info!("Blink");
-//         Timer::after(Duration::from_millis(100)).await;
-//     }
-// }
-
 static mut CORE1_STACK: Stack<4096> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 static NET_STACK: StaticCell<NetStack<cyw43::NetDriver>> = StaticCell::new();
 static mut NET_STACK_RESOURCES: StackResources<16> = StackResources::new();
-static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
 static RTC_CHANNEL: Channel<CriticalSectionRawMutex, Rtc<'static, RTC>, 1> = Channel::new();
 
-enum LedState {
-    On,
-    Off,
-}
+/*
+PWM MAP:
+Channel 0:
+A: Center R
+B: Center G
+Channel 1:
+A: Center B
+B: BL R
+Channel 2:
+A: BL G
+B: BL B
+Channel 3:
+A: BR R
+B: BR G
+Channel 4:
+A: BR B
+B: Right R
+Channel 5:
+A: Right G
+B: Right B
+Channel 6:
+A: Top R
+B: Top G
+Channel 7:
+A: Top B
+B:
+*/
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -116,9 +129,6 @@ async fn core1_task() {
     let rtc = RTC_CHANNEL.receive().await;
     info!("RTC received!");
     loop {
-        // CHANNEL.send(LedState::On).await;
-        // Timer::after_millis(100).await;
-        // CHANNEL.send(LedState::Off).await;
         let now = rtc.now().expect("rtc now");
         let time = NaiveTime::from_hms_opt(now.hour as u32, now.minute as u32, now.second as u32)
             .expect("valid time");
@@ -163,7 +173,7 @@ async fn core0_task(
         .await;
 
     info!(
-        "WiFi Initialized with MAC address {:02x}",
+        "Wi-Fi Initialized with MAC address {:02x}",
         control.address().await
     );
 
@@ -247,9 +257,10 @@ async fn core0_task(
         .expect("eeprom init");
     info!("EEPROM Initialized succesfully.");
     loop {
-        match CHANNEL.receive().await {
-            LedState::On => info!("LED High"),
-            LedState::Off => info!("LED low"),
-        }
+        // match CHANNEL.receive().await {
+        //     LedState::On => info!("LED High"),
+        //     LedState::Off => info!("LED low"),
+        // }
+        Timer::after_secs(1).await;
     }
 }
