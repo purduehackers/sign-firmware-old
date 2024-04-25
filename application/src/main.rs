@@ -2,9 +2,9 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
-use core::ptr::{addr_of, addr_of_mut};
+use core::{hint::unreachable_unchecked, ptr::addr_of_mut};
 
-use chrono::{DateTime, TimeZone};
+use chrono::{DateTime, Datelike, NaiveDateTime, NaiveTime, Timelike};
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::{Executor, Spawner};
@@ -15,16 +15,17 @@ use embassy_net::{
 };
 use embassy_rp::{
     bind_interrupts,
-    gpio::{Level, Output, Pin},
+    gpio::{Level, Output},
     multicore::{spawn_core1, Stack},
-    peripherals::{DMA_CH0, PIO0},
+    peripherals::{DMA_CH0, PIO0, RTC},
     pio::{InterruptHandler, Pio},
-    rtc::DateTime as RpDateTime,
+    pwm::Pwm,
+    rtc::{DateTime as RpDateTime, DayOfWeek, Rtc},
     spi::{Config, Spi},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_time::{Duration, Timer};
-use panic_probe::hard_fault;
+use embassy_time::Timer;
+use lightning_time::LightningTime;
 use reqwless::client::HttpClient;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
@@ -53,6 +54,7 @@ static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 static NET_STACK: StaticCell<NetStack<cyw43::NetDriver>> = StaticCell::new();
 static mut NET_STACK_RESOURCES: StackResources<16> = StackResources::new();
 static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
+static RTC_CHANNEL: Channel<CriticalSectionRawMutex, Rtc<'static, RTC>, 1> = Channel::new();
 
 enum LedState {
     On,
@@ -81,6 +83,8 @@ fn main() -> ! {
         p.DMA_CH0,
     );
 
+    let rtc = Rtc::new(p.RTC);
+
     spawn_core1(
         p.CORE1,
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
@@ -95,8 +99,9 @@ fn main() -> ! {
     let state = STATE.init(cyw43::State::new());
 
     let executor0 = EXECUTOR0.init(Executor::new());
-    executor0
-        .run(|spawner| unwrap!(spawner.spawn(core0_task(spi, cs, spawner, pwr, pio_spi, state))));
+    executor0.run(|spawner| {
+        unwrap!(spawner.spawn(core0_task(spi, cs, spawner, pwr, pio_spi, state, rtc)))
+    });
 }
 
 enum AnimationSelection {
@@ -107,11 +112,19 @@ enum AnimationSelection {
 #[embassy_executor::task]
 async fn core1_task() {
     info!("CORE 1 START");
+    info!("Waiting for RTC...");
+    let rtc = RTC_CHANNEL.receive().await;
+    info!("RTC received!");
     loop {
-        CHANNEL.send(LedState::On).await;
-        Timer::after_millis(100).await;
-        CHANNEL.send(LedState::Off).await;
-        Timer::after_millis(400).await;
+        // CHANNEL.send(LedState::On).await;
+        // Timer::after_millis(100).await;
+        // CHANNEL.send(LedState::Off).await;
+        let now = rtc.now().expect("rtc now");
+        let time = NaiveTime::from_hms_opt(now.hour as u32, now.minute as u32, now.second as u32)
+            .expect("valid time");
+        let time = LightningTime::from(time);
+
+        Timer::after_millis(50).await;
     }
 }
 
@@ -122,6 +135,11 @@ async fn wifi_task(
     runner.run().await
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct TimeResponse {
+    unixtime: i64,
+}
+
 #[embassy_executor::task]
 async fn core0_task(
     spi: Spi<'static, embassy_rp::peripherals::SPI0, embassy_rp::spi::Blocking>,
@@ -130,6 +148,7 @@ async fn core0_task(
     pwr: Output<'static>,
     pio_spi: PioSpi<'static, PIO0, 0, DMA_CH0>,
     state: &'static mut cyw43::State,
+    mut rtc: Rtc<'static, embassy_rp::peripherals::RTC>,
 ) {
     info!("CORE 0 START");
 
@@ -149,7 +168,10 @@ async fn core0_task(
     );
 
     let connected = match control.join_open(WIFI_SSID).await {
-        Ok(()) => true,
+        Ok(()) => {
+            info!("Wi-Fi connected!");
+            true
+        }
         Err(_e) => {
             warn!("Wi-Fi connection error!");
             false
@@ -164,27 +186,61 @@ async fn core0_task(
     );
     let stack = NET_STACK.init(stack);
     let state: TcpClientState<16, 16, 16> = TcpClientState::new();
-    let tcp = TcpClient::new(&stack, &state);
-    let dns = DnsSocket::new(&stack);
-    let client = HttpClient::new(&tcp, &dns);
+    let tcp = TcpClient::new(stack, &state);
+    let dns = DnsSocket::new(stack);
+    let mut client = HttpClient::new(&tcp, &dns);
 
     // Grab necessary time and update data
-    let (current_time, update_available) = if connected {
-        hard_fault()
-    } else {
-        (
-            RpDateTime {
-                year: 2003,
-                day: 29,
-                month: 12,
-                day_of_week: embassy_rp::rtc::DayOfWeek::Monday,
-                hour: 0,
-                minute: 0,
-                second: 0,
+    let current_time = if connected {
+        let mut headers = [0_u8; 1024];
+        let mut time = client
+            .request(
+                reqwless::request::Method::GET,
+                "http://worldtimeapi.org/api/timezone/America/New_York",
+            )
+            .await
+            .expect("get time");
+        let time = time.send(&mut headers).await.expect("time response");
+
+        let body = time.body().read_to_end().await.expect("read body");
+
+        let time: TimeResponse = serde_json_core::from_slice(body).expect("valid response").0;
+        let time = DateTime::from_timestamp(time.unixtime, 0).expect("valid unix time");
+
+        RpDateTime {
+            year: time.year() as u16,
+            day: time.day() as u8,
+            month: time.month() as u8,
+            day_of_week: match time.weekday().num_days_from_sunday() {
+                0 => DayOfWeek::Sunday,
+                1 => DayOfWeek::Monday,
+                2 => DayOfWeek::Tuesday,
+                3 => DayOfWeek::Wednesday,
+                4 => DayOfWeek::Thursday,
+                5 => DayOfWeek::Friday,
+                6 => DayOfWeek::Saturday,
+                _ => unsafe { unreachable_unchecked() },
             },
-            false,
-        )
+            hour: time.hour() as u8,
+            minute: time.minute() as u8,
+            second: time.second() as u8,
+        }
+    } else {
+        RpDateTime {
+            year: 2003,
+            day: 29,
+            month: 12,
+            day_of_week: embassy_rp::rtc::DayOfWeek::Monday,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        }
     };
+
+    rtc.set_datetime(current_time).expect("set datetime");
+
+    // This is so janky but I think this is the safest way to send stuff across threads like this
+    RTC_CHANNEL.send(rtc).await;
 
     let eeprom = eeprom::Eeprom::from_spi(spi, cs)
         .await
