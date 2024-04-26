@@ -22,9 +22,10 @@ use embassy_rp::{
     pwm::Pwm,
     rtc::{DateTime as RpDateTime, DayOfWeek, Rtc},
     spi::{Config, Spi},
+    watchdog::Watchdog,
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use lightning_time::LightningTime;
 use reqwless::client::HttpClient;
 use static_cell::StaticCell;
@@ -84,6 +85,9 @@ B:
 fn main() -> ! {
     let p = embassy_rp::init(Default::default());
 
+    let mut watchdog = Watchdog::new(p.WATCHDOG);
+    watchdog.start(Duration::from_secs(8));
+
     let mut config = Config::default();
     config.frequency = 20_000_000;
     let spi = Spi::new_blocking(p.SPI0, p.PIN_18, p.PIN_19, p.PIN_16, config);
@@ -107,14 +111,14 @@ fn main() -> ! {
     let config = embassy_rp::pwm::Config::default();
 
     let leds = Leds {
-        s0: Pwm::new_output_ab(p.PWM_SLICE0, p.PIN_0, p.PIN_1, config.clone()),
-        s1: Pwm::new_output_ab(p.PWM_SLICE1, p.PIN_2, p.PIN_3, config.clone()),
-        s2: Pwm::new_output_ab(p.PWM_SLICE2, p.PIN_4, p.PIN_5, config.clone()),
-        s3: Pwm::new_output_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, config.clone()),
-        s4: Pwm::new_output_ab(p.PWM_SLICE4, p.PIN_8, p.PIN_9, config.clone()),
-        s5: Pwm::new_output_ab(p.PWM_SLICE5, p.PIN_10, p.PIN_11, config.clone()),
-        s6: Pwm::new_output_ab(p.PWM_SLICE6, p.PIN_12, p.PIN_13, config.clone()),
-        s7: Pwm::new_output_a(p.PWM_SLICE7, p.PIN_14, config),
+        s0: Pwm::new_output_ab(p.PWM_SLICE0, p.PIN_0, p.PIN_1, config.clone()).into(),
+        s1: Pwm::new_output_ab(p.PWM_SLICE1, p.PIN_2, p.PIN_3, config.clone()).into(),
+        s2: Pwm::new_output_ab(p.PWM_SLICE2, p.PIN_4, p.PIN_5, config.clone()).into(),
+        s3: Pwm::new_output_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, config.clone()).into(),
+        s4: Pwm::new_output_ab(p.PWM_SLICE4, p.PIN_8, p.PIN_9, config.clone()).into(),
+        s5: Pwm::new_output_ab(p.PWM_SLICE5, p.PIN_10, p.PIN_11, config.clone()).into(),
+        s6: Pwm::new_output_ab(p.PWM_SLICE6, p.PIN_12, p.PIN_13, config.clone()).into(),
+        s7: Pwm::new_output_a(p.PWM_SLICE7, p.PIN_14, config).into(),
     };
 
     spawn_core1(
@@ -122,7 +126,7 @@ fn main() -> ! {
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
-            executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(leds))));
+            executor1.run(|spawner| unwrap!(spawner.spawn(core1_task(leds, watchdog))));
         },
     );
 
@@ -142,10 +146,19 @@ enum AnimationSelection {
 }
 
 #[embassy_executor::task]
-async fn core1_task(mut leds: Leds<'static>) {
+async fn core1_task(mut leds: Leds<'static>, mut watchdog: Watchdog) {
     info!("CORE 1 START");
     info!("Waiting for RTC...");
-    let rtc = RTC_CHANNEL.receive().await;
+    let mut rtc;
+    loop {
+        rtc = RTC_CHANNEL.try_receive().ok();
+        if rtc.is_some() {
+            break;
+        }
+        watchdog.feed();
+        Timer::after_millis(100).await
+    }
+    let rtc = rtc.expect("must have rtc");
     info!("RTC received!");
     CHANNEL.send(LedState::On).await;
     loop {
@@ -153,14 +166,21 @@ async fn core1_task(mut leds: Leds<'static>) {
         let time = NaiveTime::from_hms_opt(now.hour as u32, now.minute as u32, now.second as u32)
             .expect("valid time");
         let time = LightningTime::from(time);
+
         let colors = time.colors();
+
         leds.set_color(colors.bolt, Block::BottomLeft);
+
         for block in [Block::Top, Block::Center] {
             leds.set_color(colors.zap, block);
         }
+
         for block in [Block::Right, Block::BottomRight] {
             leds.set_color(colors.spark, block);
         }
+
+        watchdog.feed();
+
         Timer::after_millis(100).await;
     }
 }
@@ -234,8 +254,8 @@ async fn core0_task(
             info!("DHCP is now up!");
             true
         }
-        Err(_e) => {
-            warn!("Wi-Fi connection error!");
+        Err(e) => {
+            warn!("Wi-Fi connection error! Error: {}", e.status);
             false
         }
     };
@@ -253,13 +273,16 @@ async fn core0_task(
         let mut time = client
             .request(
                 reqwless::request::Method::GET,
-                "https://worldtimeapi.org/api/timezone/America/New_York",
+                "http://worldtimeapi.org/api/timezone/America/New_York",
             )
             .await
             .expect("get time");
         let time = time.send(&mut headers).await.expect("time response");
         let body = time.body().read_to_end().await.expect("read body");
         let time: TimeResponse = serde_json_core::from_slice(body).expect("valid response").0;
+
+        info!("Got time: {}", time.unixtime);
+
         let time = DateTime::from_timestamp(time.unixtime, 0).expect("valid unix time");
 
         RpDateTime {
