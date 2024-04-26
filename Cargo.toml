@@ -1,9 +1,7 @@
 [workspace]
 resolver = "2"
-members = [
-    "application",
-    "bootloader",
-]
+members = ["application", "bootloader"]
 
 [profile.release]
 debug = 2
+opt-level = "z"

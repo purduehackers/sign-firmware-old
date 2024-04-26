@@ -11,7 +11,7 @@ use embassy_executor::{Executor, Spawner};
 use embassy_net::{
     dns::DnsSocket,
     tcp::client::{TcpClient, TcpClientState},
-    Config as NetConfig, Stack as NetStack, StackResources,
+    Config as NetConfig, ConfigV4, DhcpConfig, Stack as NetStack, StackResources,
 };
 use embassy_rp::{
     bind_interrupts,
@@ -45,6 +45,12 @@ static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 static NET_STACK: StaticCell<NetStack<cyw43::NetDriver>> = StaticCell::new();
 static mut NET_STACK_RESOURCES: StackResources<16> = StackResources::new();
 static RTC_CHANNEL: Channel<CriticalSectionRawMutex, Rtc<'static, RTC>, 1> = Channel::new();
+static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
+
+enum LedState {
+    On,
+    Off,
+}
 
 /*
 PWM MAP:
@@ -141,6 +147,7 @@ async fn core1_task(mut leds: Leds<'static>) {
     info!("Waiting for RTC...");
     let rtc = RTC_CHANNEL.receive().await;
     info!("RTC received!");
+    CHANNEL.send(LedState::On).await;
     loop {
         let now = rtc.now().expect("rtc now");
         let time = NaiveTime::from_hms_opt(now.hour as u32, now.minute as u32, now.second as u32)
@@ -163,6 +170,11 @@ async fn wifi_task(
     runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
 ) -> ! {
     runner.run().await
+}
+
+#[embassy_executor::task]
+async fn net_task(stack: &'static NetStack<cyw43::NetDriver<'static>>) -> ! {
+    stack.run().await
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -197,9 +209,29 @@ async fn core0_task(
         control.address().await
     );
 
+    let mut net_config = NetConfig::default();
+    net_config.ipv4 = ConfigV4::Dhcp(DhcpConfig::default());
+
+    let stack = NetStack::new(
+        net_device,
+        net_config,
+        unsafe { &mut *addr_of_mut!(NET_STACK_RESOURCES) },
+        0xdeadbeef,
+    );
+    let stack = &*NET_STACK.init(stack);
+
+    unwrap!(spawner.spawn(net_task(stack)));
+
+    info!("Attempting Wi-Fi connection...");
     let connected = match control.join_open(WIFI_SSID).await {
         Ok(()) => {
             info!("Wi-Fi connected!");
+
+            info!("Waiting for DHCP...");
+            while !stack.is_config_up() {
+                Timer::after_millis(100).await;
+            }
+            info!("DHCP is now up!");
             true
         }
         Err(_e) => {
@@ -208,17 +240,12 @@ async fn core0_task(
         }
     };
 
-    let stack = NetStack::new(
-        net_device,
-        NetConfig::default(),
-        unsafe { &mut *addr_of_mut!(NET_STACK_RESOURCES) },
-        0xdeadbeef,
-    );
-    let stack = NET_STACK.init(stack);
-    let state: TcpClientState<16, 16, 16> = TcpClientState::new();
+    let state: TcpClientState<1, 1024, 1024> = TcpClientState::new();
     let tcp = TcpClient::new(stack, &state);
     let dns = DnsSocket::new(stack);
     let mut client = HttpClient::new(&tcp, &dns);
+
+    info!("HTTP Client initialized");
 
     // Grab necessary time and update data
     let current_time = if connected {
@@ -226,14 +253,12 @@ async fn core0_task(
         let mut time = client
             .request(
                 reqwless::request::Method::GET,
-                "http://worldtimeapi.org/api/timezone/America/New_York",
+                "https://worldtimeapi.org/api/timezone/America/New_York",
             )
             .await
             .expect("get time");
         let time = time.send(&mut headers).await.expect("time response");
-
         let body = time.body().read_to_end().await.expect("read body");
-
         let time: TimeResponse = serde_json_core::from_slice(body).expect("valid response").0;
         let time = DateTime::from_timestamp(time.unixtime, 0).expect("valid unix time");
 
@@ -277,10 +302,10 @@ async fn core0_task(
         .expect("eeprom init");
     info!("EEPROM Initialized succesfully.");
     loop {
-        // match CHANNEL.receive().await {
-        //     LedState::On => info!("LED High"),
-        //     LedState::Off => info!("LED low"),
-        // }
-        Timer::after_secs(1).await;
+        match CHANNEL.receive().await {
+            LedState::On => control.gpio_set(0, true).await,
+            LedState::Off => control.gpio_set(0, false).await,
+        }
+        Timer::after_millis(10).await;
     }
 }
