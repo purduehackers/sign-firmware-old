@@ -33,9 +33,9 @@ jobs:
       - run: cd ..
       
       - uses: softprops/action-gh-release@v2
-        draft: false
-        prerelease: false
-        make_latest: true
-        token: ${{ secrets.GITHUB_TOKEN }}
         with:
+          draft: false
+          prerelease: false
+          make_latest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: target/thumbv6m-none-eabi/release/application
