@@ -2,7 +2,7 @@ name: Deploy the application to the Sign
 
 on:
   push:
-    branches: ["master"]
+    branches: ["main"]
 
   workflow_dispatch:
 
@@ -34,5 +34,6 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
+          tag: im_testing_stuff_pls_ignore
           token: ${{ secrets.GITHUB_TOKEN }}
           files: target/thumbv6m-none-eabi/release/application
