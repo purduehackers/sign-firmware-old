@@ -24,7 +24,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: thumbv6m-none-eabi
+          targets: thumbv6m-none-eabi
+          components: llvm-tools-preview
 
       - run: cargo build --release
         working-directory: application
