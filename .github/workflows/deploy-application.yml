@@ -1,0 +1,41 @@
+name: Deploy the application to the Sign
+
+on:
+  push:
+    branches: ["master"]
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: "deploy"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: thumbv6m-none-eabi
+
+      - run: cd application
+
+      - run: cargo build --release
+
+      - run: cd ..
+      
+      - uses: softprops/action-gh-release@v2
+        draft: false
+        prerelease: false
+        make_latest: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: target/thumbv6m-none-eabi/release/application
