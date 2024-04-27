@@ -24,6 +24,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: nightly
           targets: thumbv6m-none-eabi
           components: llvm-tools
 
