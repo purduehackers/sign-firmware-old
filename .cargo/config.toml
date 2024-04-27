@@ -5,6 +5,6 @@ runner = "probe-rs run --chip RP2040"
 target = "thumbv6m-none-eabi"
 
 [env]
-DEFMT_LOG = "debug"
+DEFMT_LOG = "trace"
 SMOLTCP_DNS_MAX_RESULT_COUNT = "4"
 SMOLTCP_DNS_MAX_SERVER_COUNT = "4"

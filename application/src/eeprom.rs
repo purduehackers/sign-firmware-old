@@ -2,7 +2,7 @@ use super::ceil;
 use core::mem::size_of;
 use defmt::info;
 use embassy_rp::gpio::Output;
-use embassy_rp::peripherals::{PIN_17, SPI0};
+use embassy_rp::peripherals::{SPI0};
 use embassy_rp::rom_data::float_funcs::*;
 use embassy_rp::spi::{Blocking, Error, Spi};
 use embassy_time::{Duration, Timer};
